@@ -1,0 +1,101 @@
+pipeline {
+    agent any
+    options {
+        skipDefaultCheckout(true)
+        ansiColor("xterm")
+    }
+    environment {
+        FLUTTER = "/Users/admin/development/flutter/bin/"
+        HOMEBREW = "/usr/local/bin/"
+        GRADLE = "/usr/local/opt/gradle@7/bin"
+
+        LANG="en_US.UTF-8"
+        
+        PATH = "$PATH:$FLUTTER:$HOMEBREW:$GRADLE"
+    }
+    stages {
+        stage("Build Start") {
+            steps {
+                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                    sh "flutter doctor"
+                    sh "flutter upgrade --force"
+                    // sh "brew install gradle@7"
+                    cleanWs()
+                    checkout scm
+                }
+                dir("flutter") {
+                    sh "ls -l"
+                    sh "flutter clean && flutter pub get"
+                    catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                        sh "which flutter && flutter --version"
+                        sh "which dart && dart --version"
+                        sh "which brew && brew --version"
+                        sh "which pod && pod --version"
+                        // sh "which gradle && gradle --version"
+                        sh "which gem && gem --version"
+                        sh "which xcodebuild && xcodebuild -version"
+                    }
+                }
+            }
+        }
+
+        stage("Run Tests") {
+            steps {
+                catchError(buildResult: "UNSTABLE", stageResult: "FAILURE") {
+                    dir("flutter") {
+                        sh "flutter analyze"
+                        sh "flutter test"
+                    }
+                }   
+                
+            }
+        }
+
+        stage("Build APK") {
+            // disabled builds for androids. currently only running IPA/iOS builds
+            when {
+                expression { false }
+            }
+            steps {
+                catchError(buildResult: "FAILURE", stageResult: "FAILURE") {
+                    dir("flutter") {
+                        sh "flutter build apk"
+                    }
+                }
+            }
+        }
+
+        stage("Build IPA") {
+            steps {
+                catchError(buildResult: "FAILURE", stageResult: "FAILURE") {
+                    dir("flutter/ios") {
+                        sh "pod install --repo-update"
+                    }
+                    dir("flutter") {
+                        sh "flutter build ipa --export-options-plist=ios/ExportOptions.plist"
+                    }
+                }
+            }
+        }
+
+        stage("Zip Archives") {
+            steps {
+                catchError(buildResult: "SUCCESS", stageResult: "FAILURE") {
+                    // sh "zip -rq build/apks.zip build/app/outputs/flutter-apk/"
+                    sh "zip -r src.zip *"
+                    sh "zip -r xarchive.zip flutter/build/ios/archive"
+                    sh "zip -r ipa.zip flutter/build/ios/ipa"
+                }
+            }
+        }
+    }
+    post {
+        always {
+            archiveArtifacts(
+                fingerprint: true,
+                allowEmptyArchive: true, 
+                artifacts: "src.zip, xarchive.zip, ipa.zip",
+            )
+        }
+    }
+}
